@@ -57,19 +57,19 @@ def build_interview_graph(
     nodes.fsa_agent = FeedbackSynthesisAgent(llm, retriever)
 
     if variant == "no_kgda":
-        from src.baseline.no_kgda import RandomKGDA
+        from src.baselines.ablations.no_kgda import RandomKGDA
         nodes.kgda_agent = RandomKGDA(llm, retriever)
     else:
         nodes.kgda_agent = KnowledgeGapDetectionAgent(llm, retriever)
 
     if variant == "no_raa_ground":
-        from src.baseline.no_raa_ground import UngroundedAssessor
+        from src.baselines.ablations.no_raa_ground import UngroundedAssessor
         nodes.raa_agent = UngroundedAssessor(llm, retriever)
     else:
         nodes.raa_agent = ResponseAssessmentAgent(llm, retriever)
 
     if variant == "no_rag":
-        from src.baseline.no_rag_agents import (
+        from src.baselines.ablations.no_rag_agents import (
             NoRAGFeedback,
             NoRAGKGDA,
             NoRAGQuestionGenerator,

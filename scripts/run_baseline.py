@@ -8,7 +8,12 @@ from typing import Literal
 
 from src.config import Settings
 from src.evaluation.report import save_report
-from src.evaluation.runner import EvaluationResults, EvaluationRunner, Variant
+from src.evaluation.runner import (
+    EXTERNAL_VARIANTS,
+    EvaluationResults,
+    EvaluationRunner,
+    Variant,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -28,8 +33,11 @@ async def main() -> None:
     parser.add_argument(
         "--variants",
         nargs="+",
-        default=["no_rag", "no_kgda", "no_raa_ground"],
-        help="Variants to run",
+        default=[
+            "no_rag", "no_kgda", "no_raa_ground",
+            "single_llm", "static_question_bank", "cot_single_agent",
+        ],
+        help="Variants to run (internal ablations and/or external baselines)",
     )
     parser.add_argument("--repetitions", type=int, default=3)
     args = parser.parse_args()
@@ -49,7 +57,12 @@ async def main() -> None:
             for rep in range(args.repetitions):
                 print(f"Running: variant={variant}, level={level}, rep={rep}")
                 persona = runner._build_persona(level)
-                session_result = await runner.run_session(variant, persona)
+                if variant in EXTERNAL_VARIANTS:
+                    session_result = await runner.run_external_baseline_session(
+                        variant, persona
+                    )
+                else:
+                    session_result = await runner.run_session(variant, persona)
                 session_result.repetition = rep
                 results.sessions.append(session_result)
 

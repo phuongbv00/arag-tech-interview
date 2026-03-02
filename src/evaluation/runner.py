@@ -33,7 +33,14 @@ from src.simulation.personas import (
 
 logger = logging.getLogger(__name__)
 
-Variant = Literal["full", "no_rag", "no_kgda", "no_raa_ground"]
+Variant = Literal[
+    "full", "no_rag", "no_kgda", "no_raa_ground",
+    "single_llm", "static_question_bank", "cot_single_agent",
+]
+
+INTERNAL_VARIANTS: list[Variant] = ["full", "no_rag", "no_kgda", "no_raa_ground"]
+EXTERNAL_VARIANTS: list[Variant] = ["single_llm", "static_question_bank", "cot_single_agent"]
+ALL_VARIANTS: list[Variant] = INTERNAL_VARIANTS + EXTERNAL_VARIANTS
 
 
 @dataclass
@@ -224,16 +231,99 @@ class EvaluationRunner:
 
         return result
 
+    def _build_external_baseline(self, variant: Variant):
+        """Instantiate an external baseline by variant name."""
+        from src.baselines.external.cot_single_agent import CoTSingleAgentInterviewer
+        from src.baselines.external.single_llm import SingleLLMInterviewer
+        from src.baselines.external.static_question_bank import StaticQuestionBankInterviewer
+
+        if variant == "single_llm":
+            return SingleLLMInterviewer(self.llm)
+        elif variant == "static_question_bank":
+            return StaticQuestionBankInterviewer(self.llm, self.retriever)
+        elif variant == "cot_single_agent":
+            return CoTSingleAgentInterviewer(self.llm)
+        raise ValueError(f"Unknown external variant: {variant}")
+
+    async def run_external_baseline_session(
+        self,
+        variant: Variant,
+        persona: PersonaProfile,
+    ) -> SessionResult:
+        """Run an external baseline session (bypasses LangGraph)."""
+        baseline = self._build_external_baseline(variant)
+
+        candidate = SyntheticCandidate(
+            profile=persona,
+            anthropic_client=self.anthropic_client,
+            model=self.candidate_model,
+        )
+
+        # Select topics the same way DMA would
+        from src.agents.dma import DialogueManagerAgent
+
+        dma = DialogueManagerAgent(self.llm, self.retriever, self.settings)
+        init_state = dma.initialize_session()
+        topic_ids = [init_state["current_topic"].concept_id] + init_state["topic_queue"]
+
+        # Run the external baseline's own interview loop
+        baseline_result = await baseline.run_interview(
+            topic_concept_ids=topic_ids,
+            candidate=candidate,
+            max_turns=self.settings.max_total_turns,
+        )
+
+        # Convert to SessionResult
+        result = SessionResult(
+            variant=variant,
+            persona_level=persona.level,
+            repetition=0,
+        )
+
+        for a in baseline_result.assessments:
+            result.assessments.append(a.model_dump())
+
+        if baseline_result.feedback:
+            result.feedback = baseline_result.feedback.model_dump()
+
+        # Compute custom metrics
+        planted_gaps = persona.partial_concepts + persona.unknown_concepts
+        detected_gaps = [
+            a.concept_id
+            for a in baseline_result.assessments
+            if a.overall_score < 0.5
+        ]
+        result.custom_metrics["gap_coverage_rate"] = gap_coverage_rate(
+            detected_gaps, planted_gaps
+        )
+
+        precision, recall = element_precision_recall(
+            baseline_result.assessments, persona
+        )
+        result.custom_metrics["element_precision"] = precision
+        result.custom_metrics["element_recall"] = recall
+
+        kb_ids = {c.concept_id for c in self.concepts}
+        result.custom_metrics["hallucination_rate"] = hallucination_rate(
+            baseline_result.assessments, kb_ids
+        )
+
+        if baseline_result.feedback:
+            result.custom_metrics["evidence_citation_rate"] = evidence_citation_rate(
+                baseline_result.feedback
+            )
+
+        return result
+
     async def run_full_evaluation(self) -> EvaluationResults:
         """Run all experiment combinations.
 
-        Matrix: 4 variants x 2 persona levels x N repetitions.
+        Matrix: 7 variants x 2 persona levels x N repetitions.
         """
-        variants: list[Variant] = ["full", "no_rag", "no_kgda", "no_raa_ground"]
         persona_levels = ["L1", "L3"]
         results = EvaluationResults()
 
-        for variant in variants:
+        for variant in ALL_VARIANTS:
             for level in persona_levels:
                 for rep in range(self.repetitions):
                     logger.info(
@@ -241,7 +331,14 @@ class EvaluationRunner:
                         variant, level, rep,
                     )
                     persona = self._build_persona(level)
-                    session_result = await self.run_session(variant, persona)
+
+                    if variant in EXTERNAL_VARIANTS:
+                        session_result = await self.run_external_baseline_session(
+                            variant, persona
+                        )
+                    else:
+                        session_result = await self.run_session(variant, persona)
+
                     session_result.repetition = rep
                     results.sessions.append(session_result)
 

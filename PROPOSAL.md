@@ -2,7 +2,7 @@
 
 **Target Journal:** Expert Systems with Applications (Elsevier, Q1, IF 10.48)
 **Timeline:** 3 months (submission target: June 2026)
-**Budget:** $100–500 (API calls)
+**Budget:** $500–650 (API calls + expert validation)
 
 ---
 
@@ -216,6 +216,20 @@ where:
   α + β + γ = 1 (tunable hyperparameters)
 ```
 
+**Relationship to Knowledge Tracing (KT) literature:**
+
+KGA's gap_score draws from but differs from classical Knowledge Tracing approaches:
+
+| Aspect | BKT (Corbett & Anderson, 1995) | DKT (Piech et al., 2015) | KGA (ATIA) |
+|--------|------|-----|-----|
+| Knowledge representation | P(mastery) per skill | Hidden state vector | Structured level (NONE→DEEP) + confidence per topic |
+| Prerequisite modeling | Not modeled | Implicitly learned | Explicit graph traversal (prerequisite_gap term) |
+| Update mechanism | Bayesian posterior update | LSTM hidden state update | Evidence-based update from grounded claim analysis |
+| Training data required | Yes (student response logs) | Yes (large interaction datasets) | No (operates zero-shot via LLM + graph structure) |
+| Interpretability | High (probabilistic) | Low (black-box) | High (explicit gap_score decomposition) |
+
+KGA's key advantage over KT approaches: it operates **zero-shot** without historical interaction data, leveraging the prerequisite graph structure and LLM-based response interpretation as substitutes for learned parameters. The `prerequisite_gap` term implements a structural analogue of prerequisite-driven KT (Chen et al., 2018) without requiring training data.
+
 **Surface knowledge detection:**
 
 ```
@@ -321,7 +335,29 @@ A = {
 - `consecutive_non_substantive ≥ 3` triggers early termination — if a candidate gives 3 consecutive non-substantive responses (any combination of OFF_TOPIC, CLARIFICATION, DONT_KNOW), the system concludes rather than continuing an unproductive loop.
 - REPHRASE vs REDIRECT distinction: REPHRASE keeps the same question intent but changes wording; REDIRECT keeps the same topic but asks a different question. This avoids both repetition and topic abandonment.
 
-**Why rule-based, not learned:** (a) Interpretability — every decision traceable to a rule; (b) No training data needed (critical for solo author / 3-month timeline); (c) Ablation-friendly — can replace with random/sequential/LLM-decided policies cleanly.
+**Theoretical grounding — QSA as POMDP approximation:**
+
+The adaptive interview problem can be formally modeled as a Partially Observable Markov Decision Process (POMDP):
+
+```
+POMDP = (S, A, T, R, Ω, O, γ) where:
+  S = candidate's true knowledge state (hidden)
+  A = {PROBE_GAP, VERIFY_CLAIM, DEEPEN, PIVOT, REPHRASE, REDIRECT, CONCLUDE}
+  T = state transitions (candidate learning/revealing knowledge during interview)
+  R = reward function (information gain about candidate's true state)
+  Ω = observations (candidate responses — noisy signals of true state)
+  O = observation model (P(response | true_knowledge_state, question))
+  γ = discount factor (later turns less valuable due to time pressure)
+```
+
+Solving this POMDP exactly is intractable (continuous state space, combinatorial action space). QSA's rule-based policy π(S) → A is a **handcrafted approximation** that:
+- Maintains a **belief state** via the candidate_model (updated by RA + KGA)
+- Selects actions via **domain-informed heuristics** rather than learned value functions
+- Achieves interpretability without sacrificing the formal grounding
+
+This framing connects ATIA to the CAT/IRT literature (where item selection is also a sequential decision problem) while justifying our approximation approach.
+
+**Why rule-based, not learned:** (a) Interpretability — every decision traceable to a rule; (b) No training data needed (critical for solo author / 3-month timeline); (c) Ablation-friendly — can replace with random/sequential/LLM-decided policies cleanly; (d) Formally justified as POMDP approximation with belief-state maintenance.
 
 #### Agent 4: Grounded Question Generator (GQG)
 
@@ -610,6 +646,15 @@ This eliminates need for human annotation — the evaluation becomes: **how clos
 | **Probing Efficiency**               | Ratio of substantive turns to total turns. Higher = less wasted turns on rephrasing/redirecting. Reported separately for standard vs. edge-case behavioral profiles.                                                     | Practical interview quality        |
 | **Efficiency**                       | Total tokens consumed per interview (input + output).                                                                                                                                                                    | Practical cost considerations      |
 
+**Statistical Analysis Plan:**
+
+All pairwise comparisons (ATIA vs. each baseline) use Wilcoxon signed-rank test (non-parametric, paired by candidate profile). Significance level α = 0.05 with Bonferroni correction for multiple comparisons (4 baselines → adjusted α = 0.0125). Report:
+- Effect sizes using Cliff's delta (non-parametric effect size measure)
+- 95% bootstrap confidence intervals for all metrics (10,000 resamples)
+- Per-domain breakdown to assess consistency across domains
+
+For ablation comparisons: same statistical protocol, comparing ATIA-full vs. each ablated variant.
+
 ### 6.4 Ablation Study Design
 
 | Variant             | Removed component                                                                            | Hypothesis                                                    |
@@ -638,6 +683,65 @@ This eliminates need for human annotation — the evaluation becomes: **how clos
 > - Use Claude Haiku for Candidate Simulator (cheaper, sufficient for simulating responses)
 > - Cache retrieval results aggressively (same topic queries across interviews)
 > - Estimated budget with Haiku for simulator: reduces to ~$300–350
+
+### 6.7 Expert Validation Study
+
+To address the limitation of purely automated evaluation, we conduct a small-scale expert validation study on a subset of interview transcripts.
+
+**Participants:** 3 senior software engineers (5+ years experience) recruited from professional networks. Each evaluator independently reviews the same subset of transcripts.
+
+**Scope:** 30 interview transcripts (10 per candidate level × 2 systems: ATIA + best-performing baseline), selected to include both standard and edge-case behavioral profiles.
+
+**Expert evaluation tasks:**
+
+| Task | What experts do | Metric produced |
+|------|----------------|-----------------|
+| **Assessment quality** | Rate each system's final assessment on 5-point Likert scale (1=completely inaccurate, 5=perfectly accurate) given the full transcript | Expert Assessment Score (EAS) |
+| **Simulator fidelity** | Rate realism of candidate responses (1=obviously artificial, 5=indistinguishable from real candidate) | Simulator Realism Score (SRS) |
+| **Question quality** | Rate appropriateness and relevance of interviewer questions (1=poor, 5=excellent) | Question Quality Score (QQS) |
+| **Gap identification** | Independently identify candidate knowledge gaps from transcript (without seeing system output) | Expert-identified gaps for correlation |
+
+**Analysis:**
+- Inter-rater reliability: Krippendorff's alpha (target ≥ 0.7 for acceptable agreement)
+- Correlation between AAS and EAS: Spearman's rho (validates automated metric against expert judgment)
+- Correlation between expert-identified gaps and system-identified gaps: Cohen's kappa
+- Simulator fidelity: mean SRS ≥ 3.5 threshold for acceptable realism (if below, report as limitation)
+
+**Effort & cost:** ~$200–300 compensation for 3 evaluators (each reviews 30 transcripts, ~1 hour each). No IRB required as evaluators assess system outputs, not human subjects.
+
+### 6.8 Generalizability Across LLM Backbones
+
+To demonstrate that ATIA's architectural contributions are not backbone-specific, we run a generalizability experiment:
+
+**Setup:** Run ATIA + all baselines on a second LLM backbone (GPT-4o) using a subset of 10 candidate profiles (50 interviews total).
+
+**What we compare:**
+- Absolute performance: AAS, Gap Detection F1, Hallucination Rate on GPT-4o
+- Relative ranking: whether the ranking of systems (ATIA > B3 > B2 > B4 > B1) is preserved across backbones
+- Performance gap: whether ATIA's improvement margin over baselines is consistent
+
+**Analysis:** Kendall's tau rank correlation between system rankings on Claude Sonnet vs. GPT-4o. If τ ≥ 0.8, results are considered backbone-consistent.
+
+**Budget impact:** ~$50–80 additional (GPT-4o pricing similar to Claude Sonnet for this volume).
+
+### 6.9 Updated Budget Estimation
+
+| Task                                              | Estimated cost  |
+| ------------------------------------------------- | --------------- |
+| Main experiment (150 interviews, Claude Sonnet)   | ~$95            |
+| Ablation (5 variants × 150 interviews)            | ~$475           |
+| KB construction + testing                         | ~$30            |
+| Multi-backbone experiment (50 interviews, GPT-4o) | ~$50–80         |
+| Expert validation compensation (3 evaluators)     | ~$200–300       |
+| Buffer for debugging, reruns                      | ~$50            |
+| **TOTAL**                                         | **~$700–830**   |
+
+> ⚠️ **Updated budget exceeds original $500 cap.** Mitigation strategies:
+>
+> - Use Claude Haiku for Candidate Simulator: reduces main + ablation cost to ~$300–350
+> - Run ablations on 15 profiles instead of 30 if budget tight: saves ~$200
+> - Expert validation can use volunteer reviewers from academic network (reduce to $0–100)
+> - **Revised realistic budget: ~$500–650**
 
 ---
 
@@ -676,22 +780,25 @@ This paper makes four contributions:
 | 5–6  | Implement GQG (action → grounded question generation)                                  | GQG agent with unit tests on all action types × 3 domains |
 | 6    | Integration testing: full interview loop (10 sample runs)                              | End-to-end working system                                 |
 
-### Phase 3: Evaluation (Weeks 6–9)
+### Phase 3: Evaluation (Weeks 6–10)
 
-| Week | Task                                                             | Deliverable                                |
-| ---- | ---------------------------------------------------------------- | ------------------------------------------ |
-| 6–7  | Build 30 candidate profiles + Candidate Simulator                | Profile JSONs + simulator prompt validated |
-| 7    | Implement 4 baselines                                            | All baselines runnable on same benchmark   |
-| 7–8  | Pilot run: 10 profiles × 5 systems (50 interviews)               | Preliminary results, debug issues          |
-| 8    | Full run: 30 profiles × 5 systems (150 interviews)               | Main comparison results                    |
-| 8–9  | Ablation run: 30 profiles × 5 ablation variants (150 interviews) | Ablation results                           |
-| 9    | Compute all metrics, generate tables/figures                     | Complete results section data              |
+| Week | Task                                                             | Deliverable                                    |
+| ---- | ---------------------------------------------------------------- | ---------------------------------------------- |
+| 6–7  | Build 30 candidate profiles + Candidate Simulator                | Profile JSONs + simulator prompt validated     |
+| 7    | Implement 4 baselines                                            | All baselines runnable on same benchmark       |
+| 7–8  | Pilot run: 10 profiles × 5 systems (50 interviews)               | Preliminary results, debug issues              |
+| 8    | Full run: 30 profiles × 5 systems (150 interviews)               | Main comparison results                        |
+| 8–9  | Ablation run: 30 profiles × 5 ablation variants (150 interviews) | Ablation results                               |
+| 9    | Multi-backbone run: 10 profiles × 5 systems on GPT-4o           | Cross-backbone comparison results              |
+| 9    | Recruit 3 expert evaluators, prepare annotation guidelines       | Expert evaluation kit (transcripts + rubrics)  |
+| 9–10 | Expert evaluation (async, 1 week window for evaluators)          | Expert scores + inter-rater reliability        |
+| 10   | Compute all metrics, statistical tests, generate tables/figures  | Complete results section data                  |
 
-### Phase 4: Writing & Submission (Weeks 9–12)
+### Phase 4: Writing & Submission (Weeks 10–12)
 
 | Week  | Task                                                                         | Deliverable      |
 | ----- | ---------------------------------------------------------------------------- | ---------------- |
-| 9–10  | Write Sections 1–4 (Intro, Related Work, Problem Formulation, Architecture)  | ~12–15 pages     |
+| 10    | Write Sections 1–4 (Intro, Related Work, Problem Formulation, Architecture)  | ~12–15 pages     |
 | 10–11 | Write Sections 5–6 (Experiments, Results & Analysis)                         | ~8–10 pages      |
 | 11    | Write Discussion, Conclusion, Abstract                                       | ~3–4 pages       |
 | 11–12 | Internal review cycle (self-review after 2-day break), polish figures/tables | Final manuscript |
@@ -709,13 +816,16 @@ This paper makes four contributions:
 
 | Risk                                                               | Severity | Likelihood | Mitigation                                                                                                                                                                                      |
 | ------------------------------------------------------------------ | -------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Candidate Simulator produces unrealistic responses                 | HIGH     | MEDIUM     | Validate with 5 pilot interviews; tune prompt; add response quality checks                                                                                                                      |
-| Claude API cost exceeds budget                                     | MEDIUM   | MEDIUM     | Use Haiku for simulator; cache retrieval; run pilot on subset first                                                                                                                             |
+| Candidate Simulator produces unrealistic responses                 | HIGH     | MEDIUM     | Validate with 5 pilot interviews; tune prompt; expert validation study (Section 6.7) explicitly measures simulator fidelity via Simulator Realism Score                                         |
+| Claude API cost exceeds budget                                     | MEDIUM   | MEDIUM     | Use Haiku for simulator; cache retrieval; run pilot on subset first; multi-backbone on subset only (10 profiles)                                                                                |
 | Prerequisite graph quality too low for meaningful KGA contribution | HIGH     | LOW        | Validate graph with 3 external senior engineers (informal review, not co-authorship); cross-reference with ACM curriculum                                                                       |
 | Ablation shows multi-agent doesn't help vs. single-agent           | HIGH     | MEDIUM     | If confirmed: honestly report, pivot contribution to hybrid-reasoning + differentiated-retrieval (which are testable independently)                                                             |
 | ESWA desk-reject (scope mismatch)                                  | LOW      | LOW        | ESWA explicitly lists multi-agent systems, knowledge management, and education in scope                                                                                                         |
-| Reviewer requests user study                                       | MEDIUM   | MEDIUM     | Acknowledge in Discussion as limitation; argue simulated benchmark with deterministic ground truth provides stronger internal validity than small user study; propose user study as future work |
-| Solo author bias perception                                        | LOW      | MEDIUM     | Provide reproducibility package (code + data + configs); emphasize deterministic ground truth eliminates subjective annotation                                                                  |
+| Reviewer requests user study                                       | MEDIUM   | LOW        | Expert validation study (Section 6.7) provides human judgment; simulated benchmark provides deterministic ground truth for large-scale comparison; full user study proposed as future work       |
+| Solo author bias perception                                        | LOW      | MEDIUM     | Provide reproducibility package (code + data + configs); expert validation with inter-rater reliability; deterministic ground truth eliminates subjective annotation                             |
+| Results not generalizable to other LLMs                            | MEDIUM   | LOW        | Multi-backbone experiment (Section 6.8) validates on GPT-4o; rank correlation analysis confirms architectural contributions are backbone-independent                                             |
+| Expert evaluators unavailable or low inter-rater agreement         | MEDIUM   | LOW        | Recruit from professional network early (Week 9); if Krippendorff's alpha < 0.7, report as limitation, rely on automated metrics as primary evidence                                            |
+| Scalability concerns for new domains                               | LOW      | MEDIUM     | Discuss LLM-assisted graph construction pipeline in Discussion; demonstrate construction effort is manageable (~2-3 days per domain)                                                            |
 
 ---
 
@@ -724,15 +834,15 @@ This paper makes four contributions:
 | Section                         | Pages   | Key content                                                                                                                                                                                                                                                                 |
 | ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **1. Introduction**             | 2.5     | Problem, limitations of existing approaches, contribution summary (4 bullets), paper structure                                                                                                                                                                              |
-| **2. Related Work**             | 3.5     | (2.1) RAG systems & Agentic RAG, (2.2) Multi-agent LLM architectures, (2.3) Automated interview/assessment systems, (2.4) Knowledge gap detection in education/assessment, (2.5) Gap statement positioning ATIA                                                             |
+| **2. Related Work**             | 4       | (2.1) RAG systems & Agentic RAG, (2.2) Multi-agent LLM architectures, (2.3) Intelligent Tutoring Systems & Computerized Adaptive Testing, (2.4) Automated interview/assessment systems, (2.5) Knowledge gap detection in education/assessment, (2.6) Gap statement positioning ATIA |
 | **3. Problem Formulation**      | 2       | Formal definition: inputs, outputs, quality criteria, constraints                                                                                                                                                                                                           |
 | **4. ATIA Architecture**        | 7       | (4.1) Overview + ICO, (4.2) RA with Response Classification, (4.3) KGA with formalization, (4.4) QSA with policy definition + edge case rules, (4.5) GQG, (4.6) Coordination protocol with conditional branching, (4.7) Turn 0 initialization, (4.8) Implementation details |
-| **5. Experimental Setup**       | 4       | (5.1) Benchmark construction, (5.2) Candidate profiles, (5.3) Baselines, (5.4) Metrics, (5.5) Implementation details                                                                                                                                                        |
+| **5. Experimental Setup**       | 5       | (5.1) Benchmark construction, (5.2) Candidate profiles, (5.3) Baselines, (5.4) Metrics & statistical analysis, (5.5) Expert validation design, (5.6) Multi-backbone generalizability, (5.7) Implementation details                                                          |
 | **6. Results & Analysis**       | 5       | (6.1) Main comparison (Table), (6.2) Ablation study (Table), (6.3) Per-domain analysis, (6.4) Case study (1 detailed interview trace), (6.5) Efficiency analysis                                                                                                            |
-| **7. Discussion**               | 2.5     | (7.1) Key findings interpretation, (7.2) Limitations, (7.3) Threats to validity, (7.4) Practical implications                                                                                                                                                               |
+| **7. Discussion**               | 3       | (7.1) Key findings interpretation, (7.2) Scalability & domain generalization (LLM-assisted graph construction for new domains), (7.3) Cost analysis (cost-per-interview vs. human interviewer), (7.4) Limitations, (7.5) Threats to validity, (7.6) Practical implications |
 | **8. Conclusion & Future Work** | 1.5     | Summary, future directions (user study, learned policy, multi-modal)                                                                                                                                                                                                        |
 | **References**                  | ~2      | 50–70 references                                                                                                                                                                                                                                                            |
-| **TOTAL**                       | **~30** |                                                                                                                                                                                                                                                                             |
+| **TOTAL**                       | **~32** |                                                                                                                                                                                                                                                                             |
 
 ---
 
@@ -758,11 +868,21 @@ This paper makes four contributions:
 - Automated scoring papers from CAEAI (Latif & Zhai 2024; Lee et al. 2024)
 - RAG-for-education survey on CAEAI (2025)
 
+### Intelligent Tutoring Systems & Computerized Adaptive Testing
+
+- Graesser et al. (2004) — AutoTutor: dialogue-based intelligent tutoring with adaptive questioning
+- Doignon & Falmagne (1999) — Knowledge Spaces: mathematical framework for adaptive assessment
+- ALEKS system — Knowledge Space Theory applied to adaptive learning (Falmagne et al., 2013)
+- van der Linden & Glas (2010) — Elements of Adaptive Testing (IRT/CAT comprehensive reference)
+- Embretson & Reise (2000) — Item Response Theory for psychometricians
+- Vie & Kashima (2019) — Knowledge Tracing Machines: unifying IRT + deep learning approaches
+
 ### Knowledge Gap Detection
 
 - Bayesian Knowledge Tracing (Corbett & Anderson, 1995)
 - Deep Knowledge Tracing (Piech et al., 2015)
 - Prerequisite learning literature
+- Chen et al. (2018) — Prerequisite-driven deep knowledge tracing
 
 ### Evaluation Methodology
 
@@ -781,24 +901,30 @@ This paper makes four contributions:
 | Technical reference corpus | Will create | Document sources + processing scripts (raw data may have license restrictions) |
 | Candidate profiles         | Will create | 30 JSON profiles in repo                                                       |
 | Experiment configs         | Will create | All hyperparameters, prompt templates, model versions                          |
-| Raw results                | Will create | All 300 interview transcripts (150 main + 150 ablation) as JSON                |
+| Raw results                | Will create | All interview transcripts (main + ablation + multi-backbone) as JSON           |
+| Expert evaluation data     | Will create | Annotation guidelines, raw scores, inter-rater reliability analysis            |
+| Statistical analysis       | Will create | Full statistical test outputs, confidence intervals, effect sizes              |
 | Analysis scripts           | Will create | Python notebooks reproducing all tables/figures                                |
 
 ---
 
 ## 13. Decision Log
 
-| Decision            | Chosen               | Alternatives considered   | Rationale                                                                            |
-| ------------------- | -------------------- | ------------------------- | ------------------------------------------------------------------------------------ |
-| Target journal      | ESWA                 | CAEAI, IJAIED, KBS        | Technical framing fits ESWA best; no education theory needed; no user study required |
-| LLM backbone        | Claude Sonnet        | GPT-4o, open-source       | Author familiarity; strong instruction following; cost-effective for budget          |
-| Evaluation approach | Simulated interviews | User study, expert panel  | Solo author + 3-month timeline; deterministic ground truth stronger for ablation     |
-| QSA policy          | Rule-based           | Learned (RL), LLM-decided | Interpretable, no training data needed, clean ablation possible                      |
-| Number of domains   | 3                    | 1 (deeper), 5 (broader)   | 3 balances depth vs. generalizability claims for single-author effort                |
-| Candidate profiles  | 30 (10 per level)    | 10, 50, 100               | 30 provides reasonable statistical power while fitting budget                        |
+| Decision               | Chosen                              | Alternatives considered                | Rationale                                                                                              |
+| ---------------------- | ----------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Target journal         | ESWA                                | CAEAI, IJAIED, KBS                     | Technical framing fits ESWA best; no education theory needed; no user study required                   |
+| LLM backbone           | Claude Sonnet (primary)             | GPT-4o, open-source                    | Author familiarity; strong instruction following; cost-effective for budget                            |
+| Multi-backbone         | GPT-4o (secondary, subset)          | Llama, Gemini                          | GPT-4o is most comparable closed-source model; subset run (10 profiles) balances cost vs. evidence    |
+| Evaluation approach    | Simulated + expert validation       | Simulated only, full user study        | Simulated provides scale + deterministic ground truth; expert validation adds human judgment credibility |
+| Expert validation size | 30 transcripts, 3 evaluators        | 10 transcripts, 5 evaluators           | 30 transcripts covers all levels + behaviors; 3 evaluators sufficient for Krippendorff's alpha         |
+| QSA policy             | Rule-based (POMDP approximation)    | Learned (RL), LLM-decided              | Interpretable, no training data needed, formally grounded as POMDP approximation                       |
+| Statistical testing    | Wilcoxon + Bonferroni + Cliff's d   | t-test, ANOVA                          | Non-parametric: no normality assumption needed for 30 samples; effect sizes more informative than p-values |
+| Number of domains      | 3                                   | 1 (deeper), 5 (broader)                | 3 balances depth vs. generalizability claims for single-author effort                                  |
+| Candidate profiles     | 30 (10 per level)                   | 10, 50, 100                            | 30 provides reasonable statistical power while fitting budget                                          |
 
 ---
 
-_Proposal version: 1.0_
+_Proposal version: 2.0_
 _Created: March 2026_
+_Updated: March 2026 — Added expert validation, multi-backbone experiment, statistical analysis plan, ITS/CAT positioning, POMDP framing_
 _Target submission: June 2026_

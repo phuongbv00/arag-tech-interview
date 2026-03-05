@@ -100,29 +100,29 @@ Hệ thống phỏng vấn kỹ thuật tự động dựa trên LLM có **hai h
 
 ---
 
-## Đóng góp chính — 4 contributions
+## Đóng góp chính — 4 Novel Contributions
 
 <div class="columns">
 <div>
 
-### C1: Multi-agent + Differentiated Retrieval
-
-Mỗi agent có retrieval strategy riêng thay vì dùng chung một pipeline RAG duy nhất.
+### C1: Differentiated Retrieval across Agents
+**Gap:** Các hệ thống RAG hiện tại chỉ dùng *content-based retrieval* — truy xuất theo semantic similarity với query → không phân biệt mục đích truy xuất.
+**Novel:** Mỗi agent có retrieval strategy phù hợp chức năng — *assertion-based* (grounding claims), *graph-based* (gap diagnosis), *pattern-based* (question gen), *content-based* (answer gen) → **retrieval driven by task semantics, không chỉ content similarity.**
 
 ### C2: Hybrid Knowledge-Gap Reasoning
-
-Kết hợp graph traversal (symbolic) + LLM interpretation (neural). Phát hiện "surface knowledge" — biết topic nhưng thiếu prerequisites.
+**Gap:** LLM-only assessment dễ hallucinate; Knowledge Tracing (BKT/DKT) cần training data lớn.
+**Novel:** Kết hợp *symbolic prerequisite graph traversal* + *neural LLM interpretation*, hoạt động **zero-shot** không cần training data. Phát hiện **"surface knowledge"** (biết topic nhưng thiếu prerequisites) — khả năng chẩn đoán mới mà KT truyền thống không có.
 
 </div>
 <div>
 
-### C3: Formalized Assessment Policy
+### C3: Formalized Assessment Policy (POMDP Approx.)
+**Gap:** Các hệ thống phỏng vấn LLM quyết định câu hỏi tiếp theo bằng prompt — opaque, không reproducible, không ablation được.
+**Novel:** QSA có *explicit state space S*, *action space A = {PROBE, DRILL, PIVOT, VERIFY, EXPLORE}*, và *deterministic decision function π(s)* → mô hình hóa như **POMDP approximation** — fully interpretable, formally grounded, clean ablation.
 
-QSA hoạt động trên state-action policy tường minh, mô hình hóa như POMDP approximation — interpretable, ablation-friendly.
-
-### C4: Evaluation Framework
-
-Benchmark phỏng vấn mô phỏng với ground truth xác định + expert validation + multi-backbone generalizability.
+### C4: Profile-based Evaluation Framework
+**Gap:** Đánh giá interview system phụ thuộc human subjects — tốn kém, không reproducible, small-scale.
+**Novel:** Simulated benchmark với **deterministic ground truth** từ candidate profiles + **3-layer bias mitigation** (cross-model compliance, expert validation, deterministic GT) → cho phép so sánh **270 interviews × 9 systems** reproducibly.
 
 </div>
 </div>
@@ -601,12 +601,12 @@ Tuần 6-10: Evaluation          Tuần 10-12: Writing
 
 </div>
 
-### 4 đóng góp chính
+### 4 Novel Contributions
 
-1. Kiến trúc multi-agent với retrieval strategy chuyên biệt cho từng agent
-2. Hybrid reasoning (symbolic graph + neural) cho chẩn đoán kiến thức zero-shot
-3. Assessment policy hình thức hóa (POMDP approximation) — interpretable & ablation-friendly
-4. Framework đánh giá toàn diện: simulated benchmark + expert validation + multi-backbone
+1. **Differentiated retrieval** — task-semantic retrieval thay vì chỉ content-based similarity (assertion/graph/pattern/content per agent)
+2. **Hybrid gap reasoning** — symbolic graph + neural LLM, zero-shot, phát hiện "surface knowledge" (KT truyền thống không làm được)
+3. **Formalized policy** — POMDP approximation với explicit S/A/π → interpretable, reproducible (vs. opaque LLM prompting)
+4. **Profile-based benchmark** — deterministic ground truth + 3-layer bias mitigation → 270 interviews reproducibly (vs. costly human studies)
 
 ### Evaluation
 

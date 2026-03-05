@@ -2,7 +2,7 @@
 
 **Target Journal:** Expert Systems with Applications (Elsevier, Q1, IF 10.48)
 **Timeline:** 3 months (submission target: June 2026)
-**Budget:** $500–650 (API calls + expert validation)
+**Budget:** $550–700 (API calls + expert validation)
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 2. Abstract (Draft — ~250 words)
 
-Automated technical interview systems powered by Large Language Models (LLMs) suffer from two compounding limitations: static question generation that fails to adapt to a candidate's evolving knowledge state, and response evaluation grounded solely in LLM parametric knowledge — a documented source of hallucination in high-stakes assessment contexts. This paper presents ATIA, a multi-agent Retrieval-Augmented Generation architecture for adaptive technical interview assessment. ATIA introduces three key mechanisms: (1) a hybrid knowledge-gap reasoning module that combines prerequisite dependency graph traversal with LLM-based response interpretation to diagnose candidate knowledge states, (2) a formalized assessment policy that maps candidate states to interviewing actions through an explicit decision function with defined state and action spaces, and (3) differentiated retrieval strategies across agents — assertion-based retrieval for response grounding, graph-based retrieval for gap diagnosis, and content-based retrieval for question generation — eliminating the single-retrieval-pipeline bottleneck of standard RAG. The system comprises four specialized agents (Response Analyst, Knowledge Gap Analyzer, Question Strategist, and Grounded Question Generator) coordinated through a shared Interview Context Object that provides full observability and traceability. We evaluate ATIA on a constructed benchmark of 150 simulated technical interviews spanning three software engineering domains (Data Structures & Algorithms, System Design, Backend Engineering), comparing against four baselines: monolithic LLM, vanilla RAG, single-agent RAG, and static-sequence RAG. Results demonstrate that ATIA achieves [X]% improvement in assessment alignment with expert ground truth, [X]% reduction in hallucinated evaluations, and [X]% better topic coverage compared to the strongest baseline. Ablation studies confirm that each architectural component contributes independently to system performance.
+Automated technical interview systems powered by Large Language Models (LLMs) suffer from two compounding limitations: static question generation that fails to adapt to a candidate's evolving knowledge state, and response evaluation grounded solely in LLM parametric knowledge — a documented source of hallucination in high-stakes assessment contexts. This paper presents ATIA, a multi-agent Retrieval-Augmented Generation architecture for adaptive technical interview assessment. ATIA introduces three key mechanisms: (1) a hybrid knowledge-gap reasoning module that combines prerequisite dependency graph traversal with LLM-based response interpretation to diagnose candidate knowledge states, (2) a formalized assessment policy that maps candidate states to interviewing actions through an explicit decision function with defined state and action spaces, and (3) differentiated retrieval strategies across agents — assertion-based retrieval for response grounding, graph-based retrieval for gap diagnosis, and content-based retrieval for question generation — eliminating the single-retrieval-pipeline bottleneck of standard RAG. The system comprises four specialized agents (Response Analyst, Knowledge Gap Analyzer, Question Strategist, and Grounded Question Generator) coordinated through a shared Interview Context Object that provides full observability and traceability. We evaluate ATIA on a constructed benchmark of 270 simulated technical interviews spanning three software engineering domains (Data Structures & Algorithms, System Design, Backend Engineering), comparing against eight baselines including four ablation variants (monolithic LLM, vanilla RAG, single-agent RAG, static-sequence RAG) and four published SOTA methods (LLM-as-Judge, LM-Interview, KT+RAG, CAT/IRT). Results demonstrate that ATIA achieves [X]% improvement in assessment alignment with expert ground truth, [X]% reduction in hallucinated evaluations, and [X]% better topic coverage compared to the strongest baseline. Ablation studies and expert validation confirm that each architectural component contributes independently to system performance.
 
 ---
 
@@ -606,11 +606,31 @@ IMPORTANT:
   especially if your behavioral style indicates this tendency.
 ```
 
+**Step 2b: Simulator Compliance Validation**
+
+To mitigate circular evaluation bias (LLM interviewing LLM), we implement automated compliance checks on simulator outputs:
+
+```
+For each simulator response R to question Q about topic T:
+  1. Profile Leakage Check: verify R does not contain verbatim phrases from
+     system prompt (e.g., "my profile says", "I was told to", topic lists)
+  2. Knowledge Boundary Check: verify response aligns with profile:
+     - If T ∈ topics_mastered: response should contain correct technical content
+     - If T ∈ topics_unknown: response should NOT contain correct detailed answers
+     - If T ∈ misconceptions: response should reflect the specified wrong belief
+  3. Behavioral Consistency: verify response style matches behavior_instructions
+     (e.g., evasive profile should not give crisp direct answers)
+```
+
+Compliance is checked via: (a) automated keyword/pattern matching for leakage, (b) a separate LLM call (different model — GPT-4o-mini) to classify boundary adherence, (c) expert spot-check on 10% random sample during pilot run.
+
+Non-compliant responses are flagged and the simulator prompt is iteratively refined during pilot phase until Simulator Compliance Rate ≥ 95%.
+
 **Step 3: Run Simulated Interviews**
 
-For each of 30 profiles × 5 systems (ATIA + 4 baselines) = **150 simulated interviews**.
+For each of 30 profiles × 9 systems (ATIA + 8 baselines) = **270 simulated interviews**.
 
-Each interview: 15 turns (questions), producing ~150 × 15 = 2,250 question-response pairs.
+Each interview: 15 turns (questions), producing ~270 × 15 = 4,050 question-response pairs.
 
 **Step 4: Ground Truth Construction**
 
@@ -622,14 +642,33 @@ For each candidate profile, the ground truth assessment is **deterministically d
 
 This eliminates need for human annotation — the evaluation becomes: **how closely does each system's final assessment match the known profile?**
 
-### 6.2 Baselines (4 comparisons)
+### 6.2 Baselines (8 comparisons)
 
-| Baseline                    | Description                                                                                                                                                          | What it controls for                      |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| **B1: Monolithic LLM**      | Single Claude Sonnet prompt: "Conduct a technical interview on {topics}, ask 15 questions adaptively, then assess the candidate." No RAG.                            | Value of entire ATIA architecture         |
-| **B2: Vanilla RAG**         | Single LLM + standard RAG pipeline (retrieve from same corpus before each question). No agent decomposition, no knowledge graph, no formalized policy.               | Value of multi-agent + hybrid reasoning   |
-| **B3: Single-Agent RAG**    | One agent with all ATIA's RAG corpora accessible, using a comprehensive prompt that includes gap detection + question strategy instructions. No agent decomposition. | Value of agent decomposition specifically |
-| **B4: Static-Sequence RAG** | Same as ATIA but QSA replaced with fixed question sequence (pre-determined order of topics). All other agents intact.                                                | Value of adaptive question strategy       |
+**Ablation baselines (B1–B4):** Controlled variants that isolate ATIA's architectural contributions.
+
+| Baseline                        | Description                                                                                                                                                                                                                                         | What it controls for                      |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| **B1: Monolithic LLM**          | Single Claude Sonnet prompt: "Conduct a technical interview on {topics}, ask 15 questions adaptively, then assess the candidate." No RAG, no tools. Same max_turns constraint.                                                                      | Value of entire ATIA architecture         |
+| **B2: Vanilla RAG**             | Single LLM + standard RAG pipeline (retrieve top-5 from unified corpus before each question). Same embedding model (voyage-3-lite), same corpus. No agent decomposition, no knowledge graph, no formalized policy.                                  | Value of multi-agent + hybrid reasoning   |
+| **B3: Single-Agent RAG**        | One agent with all ATIA's RAG corpora accessible, using a comprehensive prompt that includes gap detection + question strategy instructions. Same retrieval budget (top-5 per query). No agent decomposition.                                       | Value of agent decomposition specifically |
+| **B4: Static-Sequence RAG**     | Same as ATIA but QSA replaced with fixed question sequence (pre-determined order: breadth-first across topics, 3 difficulty levels per topic). All other agents intact.                                                                             | Value of adaptive question strategy       |
+
+**Published SOTA baselines (B5–B8):** External methods from recent literature, adapted to the technical interview task.
+
+| Baseline                                  | Description                                                                                                                                                                                                                                                                                                                   | What it controls for                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **B5: LLM-as-Judge (Zheng et al., 2024)** | Structured prompting approach based on Zheng et al. (2024) LLM-as-judge framework: LLM conducts interview with judge-style evaluation rubric, chain-of-thought scoring per response, and final aggregated assessment. Same corpus available via RAG.                                                                          | ATIA vs. published SOTA evaluation method               |
+| **B6: LM-Interview (Li et al., 2024)**    | Knowledge-guided LLM interview system (EMNLP 2024). Adapts their 3-stage pipeline (preparation → conducting → analysis) to the technical interview domain. Uses knowledge-guided question generation but without multi-agent decomposition or explicit knowledge-gap tracking. Same corpus and max_turns.                     | ATIA vs. published SOTA interview system                |
+| **B7: TutorLLM-style KT+RAG (2025)**      | Adapts the TutorLLM architecture: BERT-based Knowledge Tracing model predicts candidate mastery per knowledge component, RAG retrieves relevant content, LLM generates next question based on KT predictions. Replaces ATIA's graph-based gap reasoning with neural KT. Same corpus and max_turns.                            | Graph-based gap reasoning vs. neural Knowledge Tracing  |
+| **B8: CAT/IRT Adaptive (classical)**      | Computerized Adaptive Testing using 3-Parameter Logistic IRT model. Pre-calibrated item bank (same question corpus, items tagged with difficulty/discrimination parameters via expert annotation). Selects next question by maximum Fisher information criterion. LLM generates natural-language version of selected items.     | ATIA vs. classical psychometric adaptive testing        |
+
+**Baseline implementation controls (applied to all):**
+- Same LLM backbone (Claude Sonnet 4, same API version)
+- Same candidate simulator (identical prompts and profiles)
+- Same max_turns = 15, same interview scope
+- Same retrieval corpus and embedding model where applicable
+- Same token budget reporting for fair efficiency comparison
+- All prompt templates included in supplementary materials
 
 ### 6.3 Metrics
 
@@ -645,10 +684,48 @@ This eliminates need for human annotation — the evaluation becomes: **how clos
 | **Edge Case Handling Rate**          | % of non-substantive responses (CLARIFICATION, OFF_TOPIC, DONT_KNOW) correctly classified and appropriately handled (no candidate_model corruption from off-topic, no infinite probing loops, clarifications rephrased). | Response classification robustness |
 | **Probing Efficiency**               | Ratio of substantive turns to total turns. Higher = less wasted turns on rephrasing/redirecting. Reported separately for standard vs. edge-case behavioral profiles.                                                     | Practical interview quality        |
 | **Efficiency**                       | Total tokens consumed per interview (input + output).                                                                                                                                                                    | Practical cost considerations      |
+| **Latency (Time-per-turn)**          | Wall-clock time (seconds) from candidate response received to next question generated. Measured per-turn, reported as mean ± std and p95 across all turns.                                                               | Real-time deployment feasibility   |
+| **Simulator Compliance Rate**        | % of simulator responses that adhere to profile constraints (no prompt leakage, correct knowledge boundaries). Measured by automated checker + expert spot-check on 10% sample.                                          | Evaluation validity                |
+
+**Formal Metric Definitions:**
+
+```
+AAS = (1/|T|) × Σ_t∈T sim(system_level(t), gt_level(t))
+  where sim maps (predicted_level, true_level) → [0,1]:
+    exact match = 1.0, off-by-one = 0.5, off-by-two+ = 0.0
+  T = set of all in-scope topics
+
+Gap Detection F1:
+  Precision = |system_gaps ∩ gt_gaps| / |system_gaps|
+  Recall = |system_gaps ∩ gt_gaps| / |gt_gaps|
+  F1 = 2 × Precision × Recall / (Precision + Recall)
+  where gt_gaps = topics_unknown ∪ topics_partial
+
+Misconception Detection Rate = |detected_misconceptions ∩ gt_misconceptions| / |gt_misconceptions|
+
+Hallucination Rate = |contradicting_claims| / |total_assessment_claims|
+  where contradicting_claim = system says MASTERED but gt = UNKNOWN, or vice versa
+
+Topic Coverage = |topics_probed_at_least_once| / |topics_in_scope|
+
+Depth Progression Score = (1/|D|) × Σ_d∈D (max_difficulty(d) - min_difficulty(d)) / 2
+  where D = topics probed more than once, difficulty ∈ {0=BASIC, 1=INTERMEDIATE, 2=ADVANCED}
+
+Grounding Rate = |claims_with_retrieved_evidence| / |total_claims_evaluated|
+
+Edge Case Handling Rate = |correctly_handled_non_substantive| / |total_non_substantive_responses|
+
+Probing Efficiency = |substantive_turns| / |total_turns|
+
+Latency = wall_clock(question_generated) - wall_clock(response_received), in seconds
+
+Simulator Compliance Rate = |compliant_responses| / |total_responses|
+  where compliant = (no profile leakage) AND (knowledge level matches profile constraints)
+```
 
 **Statistical Analysis Plan:**
 
-All pairwise comparisons (ATIA vs. each baseline) use Wilcoxon signed-rank test (non-parametric, paired by candidate profile). Significance level α = 0.05 with Bonferroni correction for multiple comparisons (4 baselines → adjusted α = 0.0125). Report:
+All pairwise comparisons (ATIA vs. each baseline) use Wilcoxon signed-rank test (non-parametric, paired by candidate profile). Significance level α = 0.05 with Bonferroni correction for multiple comparisons (8 baselines → adjusted α = 0.00625). Report:
 - Effect sizes using Cliff's delta (non-parametric effect size measure)
 - 95% bootstrap confidence intervals for all metrics (10,000 resamples)
 - Per-domain breakdown to assess consistency across domains
@@ -667,22 +744,26 @@ For ablation comparisons: same statistical protocol, comparing ATIA-full vs. eac
 
 ### 6.5 Budget Estimation for Experiments
 
-| Task                                              | Calculation                | Estimated cost |
-| ------------------------------------------------- | -------------------------- | -------------- |
-| 150 interviews × 15 turns × ~2 agent calls/turn   | ~4,500 Claude Sonnet calls |                |
-| Average ~2,000 tokens/call (input+output)         | ~9M tokens total           |                |
-| Claude Sonnet input ($3/MTok) + output ($15/MTok) | ~$27 input + ~$67 output   | ~$95           |
-| Ablation (5 variants × 150 interviews)            | 5× above                   | ~$475          |
-| KB construction + testing                         |                            | ~$30           |
-| Buffer for debugging, reruns                      |                            | ~$50           |
-| **TOTAL**                                         |                            | **~$450–550**  |
+| Task                                                | Calculation                  | Estimated cost |
+| --------------------------------------------------- | ---------------------------- | -------------- |
+| 270 interviews × 15 turns × ~2 agent calls/turn     | ~8,100 Claude Sonnet calls   |                |
+| Average ~2,000 tokens/call (input+output)           | ~16.2M tokens total          |                |
+| Claude Sonnet input ($3/MTok) + output ($15/MTok)   | ~$49 input + ~$122 output    | ~$170          |
+| Ablation (5 variants × 30 profiles)                | 150 interviews               | ~$95           |
+| B7 KT model training (BERT-based)                  | Local GPU, no API cost       | ~$0            |
+| B8 IRT item calibration                            | Expert annotation (10 items) | ~$50           |
+| Simulator compliance validation (GPT-4o-mini calls) |                              | ~$15           |
+| KB construction + testing                           |                              | ~$30           |
+| Buffer for debugging, reruns                        |                              | ~$60           |
+| **Subtotal experiments**                            |                              | **~$420–520**  |
 
-> ⚠️ **Budget is tight.** Mitigation strategies:
+> ⚠️ **Budget mitigation strategies:**
 >
-> - Run ablations on subset first (10 profiles = 50 interviews) to validate setup before full run
-> - Use Claude Haiku for Candidate Simulator (cheaper, sufficient for simulating responses)
+> - Use Claude Haiku for Candidate Simulator: reduces main experiment cost by ~40%
+> - Run ablations on subset first (10 profiles) to validate setup before full run
 > - Cache retrieval results aggressively (same topic queries across interviews)
-> - Estimated budget with Haiku for simulator: reduces to ~$300–350
+> - B6/B7/B8 share same candidate simulator — no additional simulator cost
+> - **Estimated with Haiku simulator: ~$300–380 for experiments**
 
 ### 6.7 Expert Validation Study
 
@@ -713,7 +794,7 @@ To address the limitation of purely automated evaluation, we conduct a small-sca
 
 To demonstrate that ATIA's architectural contributions are not backbone-specific, we run a generalizability experiment:
 
-**Setup:** Run ATIA + all baselines on a second LLM backbone (GPT-4o) using a subset of 10 candidate profiles (50 interviews total).
+**Setup:** Run ATIA + all baselines on a second LLM backbone (GPT-4o) using a subset of 10 candidate profiles (90 interviews total).
 
 **What we compare:**
 - Absolute performance: AAS, Gap Detection F1, Hallucination Rate on GPT-4o
@@ -728,20 +809,24 @@ To demonstrate that ATIA's architectural contributions are not backbone-specific
 
 | Task                                              | Estimated cost  |
 | ------------------------------------------------- | --------------- |
-| Main experiment (150 interviews, Claude Sonnet)   | ~$95            |
-| Ablation (5 variants × 150 interviews)            | ~$475           |
+| Main experiment (270 interviews, Claude Sonnet)   | ~$170           |
+| Ablation (5 variants × 30 profiles)               | ~$95            |
+| B7 KT model training (local GPU)                  | ~$0             |
+| B8 IRT item calibration (expert annotation)       | ~$50            |
+| Simulator compliance checks (GPT-4o-mini)         | ~$15            |
 | KB construction + testing                         | ~$30            |
-| Multi-backbone experiment (50 interviews, GPT-4o) | ~$50–80         |
+| Multi-backbone experiment (90 interviews, GPT-4o) | ~$80–120        |
 | Expert validation compensation (3 evaluators)     | ~$200–300       |
-| Buffer for debugging, reruns                      | ~$50            |
-| **TOTAL**                                         | **~$700–830**   |
+| Buffer for debugging, reruns                      | ~$60            |
+| **TOTAL**                                         | **~$700–840**   |
 
-> ⚠️ **Updated budget exceeds original $500 cap.** Mitigation strategies:
+> ⚠️ **Budget mitigation strategies (cumulative savings ~$200–300):**
 >
-> - Use Claude Haiku for Candidate Simulator: reduces main + ablation cost to ~$300–350
-> - Run ablations on 15 profiles instead of 30 if budget tight: saves ~$200
-> - Expert validation can use volunteer reviewers from academic network (reduce to $0–100)
-> - **Revised realistic budget: ~$500–650**
+> - Use Claude Haiku for Candidate Simulator: saves ~$150–200
+> - Run ablations on 15 profiles instead of 30 if budget tight: saves ~$50
+> - Expert validation can use volunteer reviewers from academic network: saves ~$100–200
+> - B6/B7/B8 share same simulator infrastructure — no additional simulator development cost
+> - **Revised realistic budget: ~$550–700**
 
 ---
 
@@ -784,12 +869,14 @@ This paper makes four contributions:
 
 | Week | Task                                                             | Deliverable                                    |
 | ---- | ---------------------------------------------------------------- | ---------------------------------------------- |
-| 6–7  | Build 30 candidate profiles + Candidate Simulator                | Profile JSONs + simulator prompt validated     |
-| 7    | Implement 4 baselines                                            | All baselines runnable on same benchmark       |
-| 7–8  | Pilot run: 10 profiles × 5 systems (50 interviews)               | Preliminary results, debug issues              |
-| 8    | Full run: 30 profiles × 5 systems (150 interviews)               | Main comparison results                        |
-| 8–9  | Ablation run: 30 profiles × 5 ablation variants (150 interviews) | Ablation results                               |
-| 9    | Multi-backbone run: 10 profiles × 5 systems on GPT-4o           | Cross-backbone comparison results              |
+| 6–7  | Build 30 candidate profiles + Candidate Simulator + compliance checks | Profile JSONs + simulator validated (compliance ≥ 95%) |
+| 7    | Implement 8 baselines (B1–B4 ablation + B5–B8 published SOTA)        | All baselines runnable on same benchmark               |
+| 7    | B7: Train BERT-based KT model on simulated interaction data          | KT model checkpoint                                   |
+| 7    | B8: Expert-calibrate IRT item parameters (difficulty, discrimination) | Calibrated item bank                                   |
+| 7–8  | Pilot run: 10 profiles × 9 systems (90 interviews)                    | Preliminary results, debug issues                      |
+| 8–9  | Full run: 30 profiles × 9 systems (270 interviews)                    | Main comparison results                                |
+| 9    | Ablation run: 30 profiles × 5 ablation variants (150 interviews)     | Ablation results                                       |
+| 9    | Multi-backbone run: 10 profiles × 9 systems on GPT-4o               | Cross-backbone comparison results                      |
 | 9    | Recruit 3 expert evaluators, prepare annotation guidelines       | Expert evaluation kit (transcripts + rubrics)  |
 | 9–10 | Expert evaluation (async, 1 week window for evaluators)          | Expert scores + inter-rater reliability        |
 | 10   | Compute all metrics, statistical tests, generate tables/figures  | Complete results section data                  |
@@ -816,7 +903,8 @@ This paper makes four contributions:
 
 | Risk                                                               | Severity | Likelihood | Mitigation                                                                                                                                                                                      |
 | ------------------------------------------------------------------ | -------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Candidate Simulator produces unrealistic responses                 | HIGH     | MEDIUM     | Validate with 5 pilot interviews; tune prompt; expert validation study (Section 6.7) explicitly measures simulator fidelity via Simulator Realism Score                                         |
+| Candidate Simulator produces unrealistic responses                 | HIGH     | MEDIUM     | Validate with 5 pilot interviews; tune prompt; expert validation study (Section 6.7) measures simulator fidelity via SRS; automated compliance checks ensure ≥ 95% profile adherence           |
+| Circular evaluation bias (LLM evaluating LLM)                     | HIGH     | MEDIUM     | Simulator compliance validation (Step 2b) with cross-model checker (GPT-4o-mini); expert validation correlates automated vs. human metrics; different LLM for simulator compliance checking    |
 | Claude API cost exceeds budget                                     | MEDIUM   | MEDIUM     | Use Haiku for simulator; cache retrieval; run pilot on subset first; multi-backbone on subset only (10 profiles)                                                                                |
 | Prerequisite graph quality too low for meaningful KGA contribution | HIGH     | LOW        | Validate graph with 3 external senior engineers (informal review, not co-authorship); cross-reference with ACM curriculum                                                                       |
 | Ablation shows multi-agent doesn't help vs. single-agent           | HIGH     | MEDIUM     | If confirmed: honestly report, pivot contribution to hybrid-reasoning + differentiated-retrieval (which are testable independently)                                                             |
@@ -838,8 +926,8 @@ This paper makes four contributions:
 | **3. Problem Formulation**      | 2       | Formal definition: inputs, outputs, quality criteria, constraints                                                                                                                                                                                                           |
 | **4. ATIA Architecture**        | 7       | (4.1) Overview + ICO, (4.2) RA with Response Classification, (4.3) KGA with formalization, (4.4) QSA with policy definition + edge case rules, (4.5) GQG, (4.6) Coordination protocol with conditional branching, (4.7) Turn 0 initialization, (4.8) Implementation details |
 | **5. Experimental Setup**       | 5       | (5.1) Benchmark construction, (5.2) Candidate profiles, (5.3) Baselines, (5.4) Metrics & statistical analysis, (5.5) Expert validation design, (5.6) Multi-backbone generalizability, (5.7) Implementation details                                                          |
-| **6. Results & Analysis**       | 5       | (6.1) Main comparison (Table), (6.2) Ablation study (Table), (6.3) Per-domain analysis, (6.4) Case study (1 detailed interview trace), (6.5) Efficiency analysis                                                                                                            |
-| **7. Discussion**               | 3       | (7.1) Key findings interpretation, (7.2) Scalability & domain generalization (LLM-assisted graph construction for new domains), (7.3) Cost analysis (cost-per-interview vs. human interviewer), (7.4) Limitations, (7.5) Threats to validity, (7.6) Practical implications |
+| **6. Results & Analysis**       | 6       | (6.1) Main comparison (Table, 8 baselines + ATIA), (6.2) Ablation study (Table), (6.3) Per-domain analysis, (6.4) Latency analysis (time-per-turn breakdown by agent), (6.5) Case study (1 detailed interview trace), (6.6) Expert validation results, (6.7) Multi-backbone results, (6.8) Efficiency analysis |
+| **7. Discussion**               | 3.5     | (7.1) Key findings interpretation, (7.2) Latency analysis & real-time deployment feasibility (parallelization strategies, smaller models for RA/KGA), (7.3) Scalability & domain generalization (LLM-assisted graph construction), (7.4) Cost analysis (cost-per-interview vs. human interviewer), (7.5) Limitations (latency, simulated evaluation, domain scope), (7.6) Threats to validity (circular evaluation bias, simulator fidelity), (7.7) Practical implications |
 | **8. Conclusion & Future Work** | 1.5     | Summary, future directions (user study, learned policy, multi-modal)                                                                                                                                                                                                        |
 | **References**                  | ~2      | 50–70 references                                                                                                                                                                                                                                                            |
 | **TOTAL**                       | **~32** |                                                                                                                                                                                                                                                                             |
@@ -865,6 +953,7 @@ This paper makes four contributions:
 ### Assessment & Interview
 
 - LLM-as-judge literature (Zheng et al., 2024)
+- LM-Interview: knowledge-guided LLM for semi-structured interviews (Li et al., EMNLP 2024)
 - Automated scoring papers from CAEAI (Latif & Zhai 2024; Lee et al. 2024)
 - RAG-for-education survey on CAEAI (2025)
 
@@ -877,12 +966,14 @@ This paper makes four contributions:
 - Embretson & Reise (2000) — Item Response Theory for psychometricians
 - Vie & Kashima (2019) — Knowledge Tracing Machines: unifying IRT + deep learning approaches
 
-### Knowledge Gap Detection
+### Knowledge Gap Detection & Personalized Tutoring
 
 - Bayesian Knowledge Tracing (Corbett & Anderson, 1995)
 - Deep Knowledge Tracing (Piech et al., 2015)
 - Prerequisite learning literature
 - Chen et al. (2018) — Prerequisite-driven deep knowledge tracing
+- TutorLLM: Knowledge Tracing + RAG for personalized learning (2025)
+- LPITutor: LLM-based personalized tutoring with RAG and prompt engineering (PeerJ CS, 2025)
 
 ### Evaluation Methodology
 
@@ -921,10 +1012,15 @@ This paper makes four contributions:
 | Statistical testing    | Wilcoxon + Bonferroni + Cliff's d   | t-test, ANOVA                          | Non-parametric: no normality assumption needed for 30 samples; effect sizes more informative than p-values |
 | Number of domains      | 3                                   | 1 (deeper), 5 (broader)                | 3 balances depth vs. generalizability claims for single-author effort                                  |
 | Candidate profiles     | 30 (10 per level)                   | 10, 50, 100                            | 30 provides reasonable statistical power while fitting budget                                          |
+| SOTA baselines         | B5: LLM-as-Judge, B6: LM-Interview, B7: KT+RAG, B8: CAT/IRT | Single published baseline only | 4 published baselines cover different paradigms: evaluation method (B5), interview system (B6), neural KT (B7), classical psychometrics (B8) |
+| Circular eval mitigation | Cross-model compliance checker     | Same-model self-check, human-only      | GPT-4o-mini checks Claude-based simulator outputs — breaks same-model circularity at low cost         |
+| Latency reporting      | Time-per-turn metric                | Omit latency                           | ESWA reviewers expect deployment feasibility discussion; latency is critical for real-time interviews  |
 
 ---
 
-_Proposal version: 2.0_
+_Proposal version: 4.0_
 _Created: March 2026_
-_Updated: March 2026 — Added expert validation, multi-backbone experiment, statistical analysis plan, ITS/CAT positioning, POMDP framing_
+_Updated: March 2026 — v2: expert validation, multi-backbone, statistical analysis, ITS/CAT, POMDP framing_
+_Updated: March 2026 — v3: formal metric definitions, latency metric, simulator compliance validation, B5 LLM-as-Judge baseline, baseline implementation controls, circular evaluation mitigation_
+_Updated: March 2026 — v4: added 3 published SOTA baselines (B6: LM-Interview EMNLP'24, B7: KT+RAG TutorLLM-style, B8: CAT/IRT classical), 270 interviews, updated budget/timeline_
 _Target submission: June 2026_

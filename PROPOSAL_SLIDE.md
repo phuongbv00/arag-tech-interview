@@ -367,37 +367,48 @@ Turn N: candidate_response received
 - Xác định **trực tiếp từ profile** → không cần human annotation
 - Knowledge state = profile, Gaps = topics_unknown ∪ topics_partial
 
-### 4 Baselines
+### 8 Baselines (4 Ablation + 4 Published SOTA)
 
-| Baseline                    | Mô tả                           | Kiểm soát                              |
-| --------------------------- | ------------------------------- | -------------------------------------- |
-| **B1: Monolithic LLM**      | Single prompt, không RAG        | Giá trị toàn bộ ATIA                   |
-| **B2: Vanilla RAG**         | Single RAG pipeline             | Giá trị multi-agent + hybrid reasoning |
-| **B3: Single-Agent RAG**    | 1 agent, đầy đủ corpora         | Giá trị agent decomposition            |
-| **B4: Static-Sequence RAG** | ATIA nhưng QSA = fixed sequence | Giá trị adaptive strategy              |
+**Ablation baselines (B1–B4):**
 
-**Quy mô:** 30 profiles × 5 systems = **150 interviews**, ~2,250 Q&A pairs
+| Baseline                   | Mô tả                        | Kiểm soát                    |
+| -------------------------- | ----------------------------- | ---------------------------- |
+| **B1: Monolithic LLM**     | Single prompt, không RAG      | Giá trị toàn bộ ATIA         |
+| **B2: Vanilla RAG**        | Single RAG pipeline           | Multi-agent + hybrid reasoning |
+| **B3: Single-Agent RAG**   | 1 agent, đầy đủ corpora       | Agent decomposition          |
+| **B4: Static-Sequence RAG**| ATIA nhưng QSA = fixed order  | Adaptive strategy            |
+
+**Published SOTA baselines (B5–B8):**
+
+| Baseline                              | Mô tả                                          | Kiểm soát                           |
+| ------------------------------------- | ----------------------------------------------- | ------------------------------------ |
+| **B5: LLM-as-Judge (Zheng'24)**       | Judge-style evaluation + CoT scoring + RAG      | ATIA vs. SOTA evaluation method      |
+| **B6: LM-Interview (Li, EMNLP'24)**  | Knowledge-guided LLM interview, 3-stage pipeline | ATIA vs. SOTA interview system       |
+| **B7: KT+RAG (TutorLLM-style)**      | BERT-based Knowledge Tracing + RAG              | Graph-based vs. neural KT            |
+| **B8: CAT/IRT (classical)**           | 3PL IRT model + max Fisher information          | ATIA vs. classical adaptive testing  |
+
+**Controls:** Cùng LLM backbone, cùng corpus, cùng max_turns, cùng simulator
+**Quy mô:** 30 profiles × 9 systems = **270 interviews**, ~4,050 Q&A pairs
 
 ---
 
 ## Metrics & Statistical Analysis
 
-| Metric                               | Đo gì                        |
-| ------------------------------------ | ---------------------------- |
-| **Assessment Alignment Score (AAS)** | Chất lượng đánh giá tổng thể |
-| **Gap Detection F1**                 | Hiệu quả KGA                 |
-| **Misconception Detection Rate**     | Hiệu quả RA grounding        |
-| **Hallucination Rate**               | Độ tin cậy đánh giá          |
-| **Topic Coverage**                   | Hiệu quả chiến lược QSA      |
-| **Depth Progression Score**          | Khả năng thích ứng độ khó    |
-| **Edge Case Handling Rate**          | Xử lý phản hồi bất thường    |
-| **Probing Efficiency**               | Tỷ lệ turns có ích           |
+| Metric | Đo gì | Định nghĩa hình thức |
+|--------|-------|----------------------|
+| **AAS** | Chất lượng đánh giá | `(1/\|T\|) × Σ sim(pred, gt)` per topic |
+| **Gap Detection F1** | Hiệu quả KGA | Precision × Recall trên gaps |
+| **Hallucination Rate** | Độ tin cậy | `\|contradictions\| / \|claims\|` |
+| **Topic Coverage** | Chiến lược QSA | `\|probed\| / \|in_scope\|` |
+| **Latency** | Khả thi triển khai | Wall-clock seconds per turn |
+| **Simulator Compliance** | Tính hợp lệ evaluation | `\|compliant\| / \|total\|` (target ≥ 95%) |
 
 ### Statistical Analysis
 
 - **Wilcoxon signed-rank test** (non-parametric, paired by profile)
-- **Bonferroni correction** (α = 0.05/4 = 0.0125)
+- **Bonferroni correction** (α = 0.05/8 ≈ 0.00625) — 8 baselines
 - **Cliff's delta** (effect size) + **95% bootstrap CI**
+- Tất cả metrics có **formal mathematical definitions** trong paper
 
 ---
 
@@ -439,6 +450,30 @@ Turn N: candidate_response received
 
 ---
 
+## Giải quyết Circular Evaluation Bias
+
+### Vấn đề
+LLM (Claude) tạo ứng viên giả lập → LLM (Claude) đánh giá → kết quả có thể bị thổi phồng
+
+### 3 lớp bảo vệ
+
+| Lớp | Giải pháp | Chi tiết |
+|-----|----------|----------|
+| **Automated** | Simulator Compliance Checks | Profile leakage detection + knowledge boundary verification bằng **cross-model** (GPT-4o-mini kiểm tra Claude) |
+| **Expert** | Expert Validation Study | 3 engineers đánh giá SRS (simulator realism) + so sánh gaps |
+| **Architectural** | Deterministic Ground Truth | Ground truth = profile gốc, không phụ thuộc LLM judgment |
+
+### Simulator Compliance Validation
+```
+Mỗi response được kiểm tra:
+1. Profile Leakage: không lộ system prompt
+2. Knowledge Boundary: đúng level theo profile
+3. Behavioral Consistency: đúng style (evasive, standard...)
+Target: Compliance Rate ≥ 95%
+```
+
+---
+
 ## Multi-Backbone Generalizability
 
 ### Mục tiêu
@@ -447,7 +482,7 @@ Chứng minh đóng góp kiến trúc không phụ thuộc vào LLM backbone c�
 
 ### Setup
 
-- Chạy ATIA + baselines trên **GPT-4o** với **10 profiles** (50 interviews)
+- Chạy ATIA + 8 baselines trên **GPT-4o** với **10 profiles** (90 interviews)
 - So sánh với kết quả Claude Sonnet
 
 ### Phân tích
@@ -486,32 +521,37 @@ Tuần 6-10: Evaluation          Tuần 10-12: Writing
 
 | Hạng mục                                        | Chi phí ước tính |
 | ----------------------------------------------- | ---------------- |
-| Main experiment (150 interviews, Claude Sonnet) | ~$95             |
-| Ablation (5 variants × 150 interviews)          | ~$475            |
+| Main experiment (270 interviews, Claude Sonnet) | ~$170            |
+| Ablation (5 variants × 30 profiles)             | ~$95             |
+| B7 KT model training (local GPU)               | ~$0              |
+| B8 IRT item calibration (expert)               | ~$50             |
+| Simulator compliance (GPT-4o-mini)              | ~$15             |
 | KB construction + testing                       | ~$30             |
-| Multi-backbone (50 interviews, GPT-4o)          | ~$50–80          |
+| Multi-backbone (90 interviews, GPT-4o)          | ~$80–120         |
 | Expert validation (3 evaluators)                | ~$200–300        |
-| Buffer                                          | ~$50             |
-| **Tổng**                                        | **~$700–830**    |
+| Buffer                                          | ~$60             |
+| **Tổng**                                        | **~$700–840**    |
 
-### Chiến lược tiết kiệm
+### Chiến lược tiết kiệm (~$200-300)
 
 - Claude Haiku cho Candidate Simulator → giảm ~$150-200
 - Volunteer evaluators từ academic network → giảm ~$100-200
-- **Budget thực tế: ~$500–650**
+- B6/B7/B8 dùng chung simulator infrastructure
+- **Budget thực tế: ~$550–700**
 
 ---
 
 ## Quản lý rủi ro
 
-| Rủi ro                                 | Mức độ | Giải pháp                                                         |
-| -------------------------------------- | ------ | ----------------------------------------------------------------- |
-| Simulator không thực tế                | HIGH   | Expert validation đo SRS; pilot 5 interviews                      |
-| Vượt budget                            | MEDIUM | Haiku cho simulator; ablation trên subset                         |
-| Multi-agent không hiệu quả             | HIGH   | Báo cáo trung thực; pivot sang hybrid-reasoning                   |
-| Reviewer yêu cầu user study            | MEDIUM | Expert validation + simulated benchmark; user study = future work |
-| Kết quả không generalize sang LLM khác | MEDIUM | Multi-backbone experiment trên GPT-4o                             |
-| Scalability cho domain mới             | LOW    | Thảo luận LLM-assisted graph construction                         |
+| Rủi ro                                 | Mức độ | Giải pháp                                                            |
+| -------------------------------------- | ------ | -------------------------------------------------------------------- |
+| **Circular evaluation bias**           | HIGH   | Cross-model compliance check + expert validation + deterministic GT  |
+| Simulator không thực tế                | HIGH   | Compliance ≥ 95% + SRS from experts; pilot 5 interviews             |
+| Vượt budget                            | MEDIUM | Haiku cho simulator; ablation trên subset                            |
+| Latency quá cao cho real-time          | MEDIUM | Đo + báo cáo; thảo luận parallelization strategies                  |
+| Multi-agent không hiệu quả             | HIGH   | Báo cáo trung thực; pivot sang hybrid-reasoning                      |
+| Reviewer yêu cầu user study            | MEDIUM | Expert validation + deterministic GT; user study = future work       |
+| Kết quả không generalize              | MEDIUM | Multi-backbone experiment trên GPT-4o (60 interviews)                |
 
 ---
 
@@ -568,8 +608,10 @@ Tuần 6-10: Evaluation          Tuần 10-12: Writing
 
 ### Evaluation
 
-- 150 simulated interviews × 5 systems + 150 ablation + 50 multi-backbone
+- 270 simulated interviews × 9 systems (4 ablation + 4 published SOTA) + 150 ablation + 90 multi-backbone
+- Simulator compliance validation (cross-model, ≥ 95%)
 - Expert validation với 3 evaluators trên 30 transcripts
-- Statistical rigor: Wilcoxon + Bonferroni + effect sizes
+- Statistical rigor: Wilcoxon + Bonferroni + Cliff's delta + formal metric definitions
+- Latency analysis cho deployment feasibility
 
 **Target:** Expert Systems with Applications (Q1, IF 10.48) — Tháng 6/2026
